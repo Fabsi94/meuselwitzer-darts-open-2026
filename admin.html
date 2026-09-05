@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin · Meuselwitzer Darts Open 2026</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+</head>
+<body>
+  <main class="container admin-container">
+    <a class="back" href="index.html">← Zur Anmeldung</a>
+
+    <section id="loginCard" class="card">
+      <span class="eyebrow">Geschützter Bereich</span>
+      <h1>Admin</h1>
+      <p class="small">Nur der hinterlegte Organisator kann sich hier anmelden.</p>
+      <form id="loginForm">
+        <input id="email" type="email" placeholder="E-Mail" autocomplete="username" required>
+        <input id="password" type="password" placeholder="Passwort" autocomplete="current-password" required>
+        <button class="primary" type="submit">Einloggen</button>
+      </form>
+      <div id="loginMessage" class="message" hidden></div>
+    </section>
+
+    <section id="adminCard" class="card" hidden>
+      <div class="section-head">
+        <div>
+          <span class="eyebrow">Übersicht</span>
+          <h1>Teilnehmer</h1>
+        </div>
+        <button id="logout" class="secondary">Ausloggen</button>
+      </div>
+      <div class="admin-stats">
+        <div><strong id="players">–</strong><span>Spieler</span></div>
+        <div><strong id="viewers">–</strong><span>Zuschauer</span></div>
+        <div><strong id="kids">–</strong><span>Kinder</span></div>
+        <div><strong id="total">–</strong><span>Gesamt</span></div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Name</th><th>Art</th><th>Preis</th><th>Bezahlt</th></tr></thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+      <div id="adminMessage" class="message" hidden></div>
+    </section>
+  </main>
+
+<script>
+const sb = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_PUBLISHABLE_KEY);
+const loginCard = document.getElementById("loginCard");
+const adminCard = document.getElementById("adminCard");
+const loginMessage = document.getElementById("loginMessage");
+
+function showLoginMessage(text, kind="error") {
+  loginMessage.hidden = false;
+  loginMessage.className = "message " + kind;
+  loginMessage.textContent = text;
+}
+
+async function checkSession() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) {
+    loginCard.hidden = true;
+    adminCard.hidden = false;
+    await loadParticipants();
+  }
+}
+
+document.getElementById("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const { error } = await sb.auth.signInWithPassword({
+    email: document.getElementById("email").value,
+    password: document.getElementById("password").value
+  });
+  if (error) return showLoginMessage("Login fehlgeschlagen. Bitte E-Mail und Passwort prüfen.");
+  loginMessage.hidden = true;
+  loginCard.hidden = true;
+  adminCard.hidden = false;
+  await loadParticipants();
+});
+
+document.getElementById("logout").addEventListener("click", async () => {
+  await sb.auth.signOut();
+  adminCard.hidden = true;
+  loginCard.hidden = false;
+});
+
+async function loadParticipants() {
+  const { data, error } = await sb
+    .from("participants")
+    .select("id,name,type,price,paid,created_at")
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    showAdminMessage("Teilnehmer konnten nicht geladen werden. Prüfe die RLS-Einstellungen.", "error");
+    return;
+  }
+
+  const counts = { spieler: 0, zuschauer: 0, kind: 0 };
+  let total = 0;
+  const tbody = document.getElementById("tableBody");
+  tbody.innerHTML = "";
+
+  for (const p of data) {
+    counts[p.type] = (counts[p.type] || 0) + 1;
+    total += p.price;
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${escapeHtml(p.name)}</td>
+      <td>${labelType(p.type)}</td>
+      <td>${p.price} €</td>
+      <td><button class="paid ${p.paid ? "is-paid" : ""}" data-id="${p.id}" data-paid="${p.paid}">
+        ${p.paid ? "✓ Bezahlt" : "Offen"}
+      </button></td>`;
+    tr.querySelector(".paid").addEventListener("click", async (ev) => {
+      const next = ev.currentTarget.dataset.paid !== "true";
+      const { error } = await sb.from("participants").update({ paid: next }).eq("id", p.id);
+      if (error) {
+        showAdminMessage("Zahlungsstatus konnte nicht geändert werden.", "error");
+        return;
+      }
+      await loadParticipants();
+    });
+    tbody.appendChild(tr);
+  }
+
+  document.getElementById("players").textContent = counts.spieler;
+  document.getElementById("viewers").textContent = counts.zuschauer;
+  document.getElementById("kids").textContent = counts.kind;
+  document.getElementById("total").textContent = total + " €";
+}
+
+function labelType(type) {
+  return type === "spieler" ? "🎯 Spieler" : type === "zuschauer" ? "👀 Zuschauer" : "👶 Kind";
+}
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function showAdminMessage(text, kind) {
+  const el = document.getElementById("adminMessage");
+  el.hidden = false; el.className = "message " + kind; el.textContent = text;
+}
+checkSession();
+</script>
+</body>
+</html>
